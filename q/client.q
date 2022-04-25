@@ -17,6 +17,11 @@
     show "slow got :: ",(-3!count r)," rows in dur :: ",-3!.z.p-start;
   };
 
+.client.ss:{
+    start:.z.p;
+    r:`::8811(`.gateway.exec;({select from tbl2 where i < 5};0));
+    show "ss got :: ",(-3!count r)," rows in dur :: ",-3!.z.p-start;
+  };
 
 .client.fn:.Q.dd[`.client;`$.z.x 0];
 .z.ts:.client.fn;
