@@ -24,14 +24,20 @@ namespace qmx {
 	asio::write(sock, asio::buffer(cap_resp), ignored_error);
       }
 
-      std::string read_login(tcp::socket& client) {
-	asio::error_code ignored_error;
+      std::string read_login(tcp::socket& client, std::vector<char>& write_extra) {
 	asio::streambuf sbuf;
-	int pwd_len = asio::read_until(client, sbuf, '\00', ignored_error);
+	// read_until can occasionally read past the delimiter
+	// we need to hold onto those extra bytes as they are part of the user query
+	// they are passed back out via ref write_extra
+	int pwd_len = asio::read_until(client, sbuf, '\00');
 	std::istream input(&sbuf);
-	std::ostringstream ss;
-	ss << input.rdbuf();
-	return ss.str();
+	std::string pwd(pwd_len, ' ');
+	input.read(&pwd[0], pwd_len);
+	std::ostringstream remaining;
+	remaining << input.rdbuf();
+	std::string str_extra = remaining.str();
+	std::copy(str_extra.begin(), str_extra.end(), std::back_inserter(write_extra));
+	return pwd;
       }
 
       // note msg may be incomplete first read but will be len > 8
@@ -41,7 +47,7 @@ namespace qmx {
 	size_t len = 0;
 	for(int i = 4; i < 8; ++i) {
 	  len += ((unsigned char)msg[i] << b_shift);
-	  b_shift += 8;
+          b_shift += 8;
 	}
 	return len;
       }      
@@ -143,9 +149,13 @@ namespace qmx {
     std::vector<char> read_some(tcp::socket& src) {
       std::vector<char> bb(65536);
       asio::error_code err;
-      int this_read = src.read_some(asio::buffer(bb, bb.size()), err);
-      if(err == asio::error::eof) {
-	throw exception::srceof();
+      int this_read = 0;
+      try{
+        this_read = src.read_some(asio::buffer(bb, bb.size()));	
+      } catch (std::system_error& err) {
+	if(0 == std::string(err.what()).compare(std::string("read_some: End of file"))) {
+	  throw exception::srceof();
+	}	
       }
       bb.resize(this_read);
       return bb;
@@ -183,13 +193,17 @@ namespace qmx {
       }
   
       void exec() {
+	std::vector<char> buff{};
 	util::kdb::write_capability(client);    
-	std::string user_pass = util::kdb::read_login(client);
+	std::string user_pass = util::kdb::read_login(client, buff);
         
 	while(true) {
 	  std::optional<worker::owned_connection> reply_to;
 	  try {
-	    std::vector<char> chunk =  io::read_some(client); // block until client starts sending
+	    if(buff.size() > 0) {
+	      std::cout << " **** ** into the long password read code" << std::endl;
+	    }
+	    std::vector<char> chunk = (buff.size() > 0) ? buff : io::read_some(client); // block until client starts
 	    reply_to.emplace(provide()); // take a worker from the pool *after* client query comes in.
 	    io::transfer_remaining(client, (*reply_to).socket(), chunk);
 	  } catch (exception::srceof const& e) {
@@ -197,6 +211,7 @@ namespace qmx {
 	    break;
 	  }
 	  io::transfer_remaining((*reply_to).socket(), client, io::read_some((*reply_to).socket()));
+	  buff.clear();
 	}
       }
 
