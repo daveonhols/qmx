@@ -5,10 +5,11 @@
 #include <deque>
 #include <unordered_map>
 
-
-using asio::ip::tcp;
+#include "spdlog/spdlog.h"
 
 #include "gw.hpp"
+
+using asio::ip::tcp;
 
 qmx::worker::owned_connection::~owned_connection() { 
   if(conn) {
@@ -28,6 +29,15 @@ qmx::worker::owned_connection::~owned_connection() {
 
 
 int main(int argc, char*argv[]) {
+
+  spdlog::set_level(spdlog::level::debug);
+  
+  spdlog::info("Logging :: info");
+  spdlog::error("Logging :: error");
+  spdlog::warn("Logging :: warn");
+  spdlog::critical("Logging :: critical");
+  spdlog::debug("Logging :: debug");
+
   asio::io_context io;
   qmx::worker::connection w1(io, "127.0.0.1",8833);
   qmx::worker::connection w2(io, "127.0.0.1",8844);
