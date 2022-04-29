@@ -1,5 +1,6 @@
 #include <thread>
 #include <chrono>
+#include "spdlog/spdlog.h"
 
 namespace qmx {
   namespace util {
