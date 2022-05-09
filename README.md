@@ -1,13 +1,19 @@
 ## Kdb Gateway (POC) ##
 
-A C++ multithreaded gateway to distribute queries to Kdb worker processes.  This alpha version cannot be configured, the backend worker processes are hard coded.  It exists currently to demonstrate the benefit of a truly multithreaded gateway solution for Kdb.
+A C++ multithreaded gateway to distribute queries to Kdb worker processes.  This beta version exists mostly as a proof of concept and has no authentication or security control.  Command line options can be provided to configure the port it listens on, the logging level and the connections to the back end workers.
 
 ### Building ###
 
 This is implemented using "modern" C++ and depends on asio.  You should download ASIO and make the include path available at "/path/to/asio/"
-Logging is with spdlog.  You should download it and make the include path available at "/path/to/spdlog/"
+Logging is with spdlog.  You should download it and make the include path available at "/path/to/spdlog/".  Command line parsing is with cxxopts, download it and make it available at "/path/to/cxxopts".
 
-clang++ -Wall -std=c++17 src/gw.cpp -I ../spdlog/include/ -I ../asio/asio/include/ -lpthread -o cpp-gateway -O2
+clang++ -Wall -std=c++17 src/gw.cpp -I /path/to/cxxopts -I /path/to/spdlog/ -I /path/to/asio/ -lpthread -o cpp-gateway -O2
+
+### Running ###
+
+Running the app without command line arguments, or with -h or --help will show usage instructions.  loglevel, listening port and back end worker connections can be specified.  For example: 
+
+./cpp-gateway --port 8811 --workers 127.0.0.1:8855,127.0.0.1:8844 --loglevel debug
 
 ### Motivation ###
 
@@ -19,7 +25,7 @@ One of the classic problems when using Kdb is supporting multiple user queries i
 
 Classic implementation of a purely async gateway.  Impressive for what it acheives in five lines of code but has various issues, particularly that the gateway itself is still single threaded so serialisation of large objects is blocking.  It also has no concept of queuing queries when all workers are busy so throughput is generally not optimal - in the case of N workers and N+1 queries, the N+1th query can end up being queued behind the slowest of the N running queries.  Also, being asyncronous makes it a bit tedious for users to interact with, and one client submitting queries async in a tight loop can overwhelm and crash it.
 
-#### -30! (https://github.com/daveonhols/qmx2/blob/master/30gw.q https://code.kx.com/q/kb/deferred-response/) ####
+#### -30! (https://github.com/daveonhols/qmx2/blob/master/q/30gw.q https://code.kx.com/q/kb/deferred-response/) ####
 
 -30! deferred response is a feature added a few years ago in Kdb 3.6, it allows an mserve like gateway to be written that users can interact with syncronously rather than async.  This makes the general user interactions more straight forward and it is probably harder for one user to accidentally overload the server with queries.  There isn't a classic -30! gateway implementation that I know of for download but I have provided a proof of concept linked above to demonstrate the single threaded limitations of this and the mserve equivalent.
 
@@ -70,9 +76,11 @@ The output for the "fast" client shows large and repeated stalling, queries go f
 
 Note that we can also run client.q in "slow" mode which does a simple sleep in the worker query, to simulate long running queries.  In this case we see consistent high performance for the "fast" client.  This points to the bottleneck being in the gateway rather than the workers.  If we use top to view cpu usage of the system when the "big" and "fast" clients are querying together, we can see the gateway cpu usage goes up to 100% (but not higher) for prolonged periods.
 
+The reason for the "fast" client being slowed down intermittently is the single threaded nature of Kdb.  The serialisation of the "big" result set in the gateway itself, blocks all client queries while it is ongoing, hence the "fast" client is stalled.
+
 ### The Solution ###
 
-For now we run the gateway as a standalone executable.  As mentioned above, this is an alpha version so it can't be configured etc.  It listens on a port (just as a regular Q process with -p xxxx would) and forwards queries to a free back end worker, blocking if none are free, in a manner very similar to the -30! gateway.  Again we can run the "big" and "fast" query clients, but this time, we find that the fast client does not get intermittently blocked.
+With this gateway implementation running instead of the Q implementation, we can compare the behaviour.  It listens on a port (just as a regular Q process with -p xxxx would) and forwards queries to a free back end worker, blocking if none are free, in a manner very similar to the -30! gateway.  Again we can run the "big" and "fast" query clients, but this time, we find that the fast client does not get intermittently blocked.
 
 ```
 "fast got :: 1 rows in dur :: 0D00:00:00.000395000"
@@ -91,3 +99,4 @@ For now we run the gateway as a standalone executable.  As mentioned above, this
 "fast got :: 1 rows in dur :: 0D00:00:00.000776000"
 "fast got :: 1 rows in dur :: 0D00:00:00.001831000"
 ```
+You can check out the code and see this for yourself.
