@@ -1,8 +1,10 @@
 #include <thread>
 #include <chrono>
+
 #include "spdlog/spdlog.h"
 
 namespace qmx {
+  using asio::ip::tcp;
   namespace util {
     namespace kdb {      
       tcp::socket get_socket(asio::io_context& io, std::string ip, int port) {
@@ -93,6 +95,14 @@ namespace qmx {
       tcp::socket& socket() {
 	return *sock;
       }
+
+      static connection build(asio::io_context& io, std::string cfg) {
+	size_t s_pos = cfg.find(':');
+	std::string cfg_host = cfg.substr(0,s_pos);
+	std::string cfg_port = cfg.substr(s_pos+1);
+	return connection(io, cfg_host, std::stoi(cfg_port));
+      }
+      
     private:
       asio::io_context& io;
       std::string host;
@@ -155,32 +165,34 @@ namespace qmx {
 	return res;
       }
 
-      recover_failed get_recover_fn() {
+      void health_check() {
+	
 	using namespace std::chrono_literals;
-	return [this]() {
-		 while(true) {		   
-		   std::this_thread::sleep_for(2000ms);
-		   std::unique_lock<std::mutex> guard(mutex);
-		   int to_recover = failed.size();
-		   int recovered = 0;
-		   while(to_recover > 0) {
-		     connection recover = std::move(failed.front());
-		     failed.pop_front();
-     		     to_recover--;
-		     try{
-		       recover.connect();
-		     } catch (std::system_error& err) {
-		       failed.push_back(std::move(recover));
-		       continue;
-		     }
-		     workers.push_back(std::move(recover));
-		     recovered++;
-		   }
-		   if(recovered > 0) {
-		     ready.notify_one();
-		   }
-		 }
-	       };
+
+	while(true) {		   
+	  std::this_thread::sleep_for(2000ms);
+	  std::unique_lock<std::mutex> guard(mutex);
+	  int to_recover = failed.size();
+	  int recovered = 0;
+	  while(to_recover > 0) {
+	    spdlog::warn("Recovering {0:d} ", to_recover);
+	    connection recover = std::move(failed.front());
+	    failed.pop_front();
+	    to_recover--;
+	    try{
+	      recover.connect();
+	    } catch (std::system_error& err) {
+	      failed.push_back(std::move(recover));
+	      continue;
+	    }
+	    workers.push_back(std::move(recover));
+	    recovered++;
+	    spdlog::warn("Recovered {0:d}",  recovered);
+	  }
+	  if(recovered > 0) {
+	    ready.notify_one();
+	  }
+	}
       }
 
       void done(connection c) {
@@ -194,12 +206,12 @@ namespace qmx {
 	failed.push_back(std::move(c));
       }
 
-      worker_provider getter() {
+      worker_provider get_worker_provider() {
 	return [this]() -> owned_connection {
 		 owned_connection owned(take(), *this);
 		 return owned;
 	       };
-      }  
+      }      
     };
   }
 
